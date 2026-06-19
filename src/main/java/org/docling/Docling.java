@@ -1,6 +1,8 @@
 package org.docling;
 
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -12,6 +14,8 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * A thin, embeddable Java wrapper around the {@code docling} command-line tool.
@@ -29,6 +33,11 @@ import java.util.stream.Stream;
  * <p>Instances are immutable and safe to reuse across conversions.
  */
 public final class Docling {
+
+  private static final Logger log = LoggerFactory.getLogger(Docling.class);
+
+  /** How long to wait for the output-draining thread to finish after the process has ended. */
+  private static final long SHUTDOWN_GRACE_MILLIS = 2_000;
 
   /** Markdown image whose target is a base64 data URI, e.g. {@code ![alt](data:image/png;base64,…)}. */
   private static final Pattern MARKDOWN_BASE64_IMAGE =
@@ -185,15 +194,18 @@ public final class Docling {
     command.add("--output");
     command.add(outputDir.toString());
 
-    int exitCode = run(command);
-    if (exitCode != 0) {
-      throw new DoclingException("docling exited with code " + exitCode + " for source: " + source);
+    ProcessResult result = run(command);
+    if (result.exitCode() != 0) {
+      String detail = result.output().isBlank() ? "" : "\n" + result.output().strip();
+      throw new DoclingException(
+          "docling exited with code " + result.exitCode() + " for source: " + source + detail);
     }
     return findMarkdown(outputDir);
   }
 
-  private int run(List<String> command) {
-    ProcessBuilder pb = new ProcessBuilder(command).redirectErrorStream(true).inheritIO();
+  private ProcessResult run(List<String> command) {
+    log.debug("Running docling: {}", String.join(" ", command));
+    ProcessBuilder pb = new ProcessBuilder(command).redirectErrorStream(true);
     Process process;
     try {
       process = pb.start();
@@ -203,21 +215,56 @@ public final class Docling {
               + "(pip install docling).",
           e);
     }
+
+    // Drain the process output on a separate thread so a chatty docling can never block on a full
+    // pipe buffer while we wait for it to finish. Each line is logged at DEBUG and captured so it
+    // can be surfaced in the exception message on failure.
+    StringBuilder captured = new StringBuilder();
+    Thread gobbler = startOutputGobbler(process, captured);
+
     try {
       if (!timeout.isZero()) {
         if (!process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS)) {
           process.destroyForcibly();
+          gobbler.join(SHUTDOWN_GRACE_MILLIS);
           throw new DoclingException("docling timed out after " + timeout.toSeconds() + "s.");
         }
-        return process.exitValue();
+      } else {
+        process.waitFor();
       }
-      return process.waitFor();
+      gobbler.join(SHUTDOWN_GRACE_MILLIS);
+      return new ProcessResult(process.exitValue(), captured.toString());
     } catch (InterruptedException e) {
       process.destroyForcibly();
       Thread.currentThread().interrupt();
       throw new DoclingException("Interrupted while waiting for docling.", e);
     }
   }
+
+  private static Thread startOutputGobbler(Process process, StringBuilder sink) {
+    Thread thread =
+        new Thread(
+            () -> {
+              try (BufferedReader reader =
+                  new BufferedReader(
+                      new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                  log.debug("[docling] {}", line);
+                  sink.append(line).append(System.lineSeparator());
+                }
+              } catch (IOException e) {
+                log.debug("Failed to read docling output stream", e);
+              }
+            },
+            "docling-output");
+    thread.setDaemon(true);
+    thread.start();
+    return thread;
+  }
+
+  /** Outcome of a docling process invocation: its exit code and the combined stdout/stderr. */
+  private record ProcessResult(int exitCode, String output) {}
 
   private static String stripBase64Images(String markdown) {
     String withoutMarkdown = MARKDOWN_BASE64_IMAGE.matcher(markdown).replaceAll("");

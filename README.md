@@ -8,6 +8,10 @@ standalone **CLI**.
 It does not reimplement conversion — it shells out to the `docling` executable, so that
 tool must be installed and reachable on your `PATH`.
 
+It is a plain library with no framework dependencies — drop it into any application (Spring
+Boot included) and wire it up however you like. Logging goes through SLF4J, so it adopts
+whatever logging backend your application already uses.
+
 ## Prerequisites
 
 **1. Install docling with pip** (Python 3.9+):
@@ -146,6 +150,33 @@ A `Docling` instance is immutable and safe to reuse across conversions. On any f
 | `Docling#convert(String\|Path [, boolean])` | Convert a source (path or URL) and return the Markdown as a `String`; optional flag strips base64 images |
 | `Docling#convert(byte[], String [, boolean])` | Convert in-memory bytes (with a format extension); optional flag strips base64 images |
 | `Docling#convertToDir(String, Path)` | Convert a source, write the `.md` into a dir, return its `Path` |
+
+### Use it from a framework (e.g. Spring)
+
+There is nothing framework-specific to configure — a `Docling` instance is just an immutable,
+thread-safe object. In Spring, expose one as a bean and inject it wherever you need it:
+
+```java
+@Configuration
+class DoclingConfig {
+
+    @Bean
+    Docling docling() {
+        return Docling.builder()
+            .timeout(Duration.ofMinutes(5))
+            .build();
+    }
+}
+```
+
+## Logging
+
+The library logs through the [SLF4J](https://www.slf4j.org/) API only — it does not bundle a
+binding, so it adopts your application's logging backend (e.g. Logback). The `docling`
+subprocess output is captured and logged line-by-line at `DEBUG` under the
+`org.docling.Docling` logger, and is also included in the `DoclingException` message when a
+conversion fails. To watch a conversion live, set that logger to `DEBUG` in your backend's
+configuration.
 
 ## Use it as a CLI
 

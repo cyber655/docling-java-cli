@@ -39,14 +39,43 @@
     <properties>
         <maven.compiler.release>25</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <picocli.version>4.7.6</picocli.version>
+        <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+        <picocli.version>4.7.7</picocli.version>
+        <slf4j.version>2.0.18</slf4j.version>
+        <junit.version>5.11.4</junit.version>
     </properties>
 
     <dependencies>
+        <!-- Logging facade only: the library logs through SLF4J and lets the host application
+             (e.g. Spring Boot's Logback) supply the binding. -->
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+            <version>${slf4j.version}</version>
+        </dependency>
+
+        <!-- CLI argument parsing. -->
         <dependency>
             <groupId>info.picocli</groupId>
             <artifactId>picocli</artifactId>
             <version>${picocli.version}</version>
+        </dependency>
+
+        <!-- A simple SLF4J binding so the standalone CLI jar emits logs out of the box. Optional,
+             so library consumers (who bring their own binding) never receive it transitively. -->
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-simple</artifactId>
+            <version>${slf4j.version}</version>
+            <optional>true</optional>
+        </dependency>
+
+        <!-- Tests. -->
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <version>${junit.version}</version>
+            <scope>test</scope>
         </dependency>
     </dependencies>
 
