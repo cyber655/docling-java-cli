@@ -124,6 +124,30 @@ String fromBytes = docling.convert(pdfBytes, "pdf", true);     // from bytes
 The flag defaults to `false`, so the existing single-argument calls keep returning the full
 Markdown unchanged.
 
+### Insert page-number markers
+
+Pass an optional `insertPageNumbers` flag to prefix each page's content with a marker line:
+
+```text
+---- Page 1 ----
+```
+
+It works for paths/URLs and for in-memory bytes:
+
+```java
+String marked = docling.convert("path/to/file.pdf", false, true);   // from a path or URL
+String fromBytes = docling.convert(pdfBytes, "pdf", false, true);    // from bytes
+```
+
+The two booleans are `removeBase64Images` then `insertPageNumbers`, so combine them freely
+(e.g. `convert(pdfBytes, "pdf", true, true)` strips images *and* numbers pages).
+
+> **How it works.** The docling CLI can't emit page boundaries into Markdown, so when this flag
+> is on the library runs a single conversion that also produces docling's JSON, then re-discovers
+> each page boundary from the JSON's per-item page numbers and inserts the marker just before that
+> page's first text. It is best-effort: a page with no locatable text of its own (e.g. a
+> spreadsheet sheet that is a single table) is left unmarked rather than risk a misplaced marker.
+
 ### Keep the file on disk
 
 If you'd rather keep the generated `.md` file on disk, write it to a directory and get its
@@ -147,8 +171,8 @@ A `Docling` instance is immutable and safe to reuse across conversions. On any f
 | `.executable(String)` | Name or path of the docling executable (default `docling`) |
 | `.timeout(Duration)` | Max wait per conversion (default 600s; `Duration.ZERO` = no limit) |
 | `.build()` | Create the immutable `Docling` instance |
-| `Docling#convert(String\|Path [, boolean])` | Convert a source (path or URL) and return the Markdown as a `String`; optional flag strips base64 images |
-| `Docling#convert(byte[], String [, boolean])` | Convert in-memory bytes (with a format extension); optional flag strips base64 images |
+| `Docling#convert(String\|Path [, removeBase64Images [, insertPageNumbers]])` | Convert a source (path or URL) and return the Markdown as a `String`; optional flags strip base64 images and insert `---- Page N ----` markers |
+| `Docling#convert(byte[], String [, removeBase64Images [, insertPageNumbers]])` | Convert in-memory bytes (with a format extension); optional flags strip base64 images and insert page markers |
 | `Docling#convertToDir(String, Path)` | Convert a source, write the `.md` into a dir, return its `Path` |
 
 ### Use it from a framework (e.g. Spring)

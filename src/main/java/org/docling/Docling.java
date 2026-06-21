@@ -84,6 +84,24 @@ public final class Docling {
    * @throws DoclingException if docling cannot be launched, times out, or exits non-zero
    */
   public String convert(String source, boolean removeBase64Images) {
+    return convert(source, removeBase64Images, false);
+  }
+
+  /**
+   * Converts the given source (local file path or URL) to Markdown and returns it as a string.
+   *
+   * @param source path or URL of the document to convert
+   * @param removeBase64Images when {@code true}, strips images embedded as base64 data URIs from the
+   *     generated Markdown (both {@code ![...](data:image/...)} and {@code <img src="data:image/...">}
+   *     forms)
+   * @param insertPageNumbers when {@code true}, inserts a {@code ---- Page N ----} marker line at the
+   *     start of each page's content. Page boundaries come from docling's JSON output, so this runs a
+   *     single conversion that also emits JSON. Best-effort: pages with no locatable text are left
+   *     unmarked.
+   * @return the generated Markdown
+   * @throws DoclingException if docling cannot be launched, times out, or exits non-zero
+   */
+  public String convert(String source, boolean removeBase64Images, boolean insertPageNumbers) {
     Path tempDir;
     try {
       tempDir = Files.createTempDirectory("docling-java-");
@@ -91,8 +109,12 @@ public final class Docling {
       throw new DoclingException("Failed to create a temporary output directory.", e);
     }
     try {
-      Path markdown = convertToDir(source, tempDir);
+      Path markdown = convertToDir(source, tempDir, insertPageNumbers);
       String content = Files.readString(markdown, StandardCharsets.UTF_8);
+      if (insertPageNumbers) {
+        String json = Files.readString(findByExtension(tempDir, ".json"), StandardCharsets.UTF_8);
+        content = PageMarkers.insert(content, json);
+      }
       return removeBase64Images ? stripBase64Images(content) : content;
     } catch (IOException e) {
       throw new DoclingException("Failed to read the generated Markdown.", e);
@@ -113,7 +135,19 @@ public final class Docling {
    * @param removeBase64Images when {@code true}, strips base64-embedded images from the output
    */
   public String convert(Path source, boolean removeBase64Images) {
-    return convert(source.toString(), removeBase64Images);
+    return convert(source.toString(), removeBase64Images, false);
+  }
+
+  /**
+   * Converts a local file to Markdown and returns it as a string.
+   *
+   * @param source path of the document to convert
+   * @param removeBase64Images when {@code true}, strips base64-embedded images from the output
+   * @param insertPageNumbers when {@code true}, inserts a {@code ---- Page N ----} marker at the
+   *     start of each page (see {@link #convert(String, boolean, boolean)})
+   */
+  public String convert(Path source, boolean removeBase64Images, boolean insertPageNumbers) {
+    return convert(source.toString(), removeBase64Images, insertPageNumbers);
   }
 
   /**
@@ -148,6 +182,27 @@ public final class Docling {
    * @throws DoclingException if docling cannot be launched, times out, or exits non-zero
    */
   public String convert(byte[] data, String extension, boolean removeBase64Images) {
+    return convert(data, extension, removeBase64Images, false);
+  }
+
+  /**
+   * Converts in-memory document bytes to Markdown and returns it as a string.
+   *
+   * <p>docling infers the input format from the file extension, so an {@code extension} matching the
+   * data is required. The bytes are written to a temporary file (deleted afterwards) before being
+   * handed to docling.
+   *
+   * @param data the raw document bytes (e.g. the contents of a PDF or DOCX)
+   * @param extension the file extension describing the data, with or without a leading dot (e.g.
+   *     {@code "pdf"}, {@code ".docx"})
+   * @param removeBase64Images when {@code true}, strips base64-embedded images from the output
+   * @param insertPageNumbers when {@code true}, inserts a {@code ---- Page N ----} marker at the
+   *     start of each page (see {@link #convert(String, boolean, boolean)})
+   * @return the generated Markdown
+   * @throws DoclingException if docling cannot be launched, times out, or exits non-zero
+   */
+  public String convert(
+      byte[] data, String extension, boolean removeBase64Images, boolean insertPageNumbers) {
     if (data == null) {
       throw new IllegalArgumentException("data must not be null");
     }
@@ -165,7 +220,7 @@ public final class Docling {
       throw new DoclingException("Failed to write input bytes to a temporary file.", e);
     }
     try {
-      return convert(tempFile.toString(), removeBase64Images);
+      return convert(tempFile.toString(), removeBase64Images, insertPageNumbers);
     } finally {
       deleteRecursively(tempFile);
     }
@@ -180,6 +235,14 @@ public final class Docling {
    * @throws DoclingException if docling cannot be launched, times out, or exits non-zero
    */
   public Path convertToDir(String source, Path outputDir) {
+    return convertToDir(source, outputDir, false);
+  }
+
+  /**
+   * Converts the given source to Markdown in {@code outputDir}, optionally also emitting docling's
+   * JSON alongside it (used to recover page boundaries for page numbering).
+   */
+  private Path convertToDir(String source, Path outputDir, boolean alsoJson) {
     try {
       Files.createDirectories(outputDir);
     } catch (IOException e) {
@@ -191,6 +254,10 @@ public final class Docling {
     command.add(source);
     command.add("--to");
     command.add("md");
+    if (alsoJson) {
+      command.add("--to");
+      command.add("json");
+    }
     command.add("--output");
     command.add(outputDir.toString());
 
@@ -272,14 +339,21 @@ public final class Docling {
   }
 
   private static Path findMarkdown(Path outputDir) {
+    return findByExtension(outputDir, ".md");
+  }
+
+  private static Path findByExtension(Path outputDir, String extension) {
     try (Stream<Path> files = Files.list(outputDir)) {
       return files
-          .filter(p -> p.getFileName().toString().endsWith(".md"))
+          .filter(p -> p.getFileName().toString().endsWith(extension))
           .findFirst()
           .orElseThrow(
               () ->
                   new DoclingException(
-                      "Conversion finished but no Markdown file was produced in " + outputDir));
+                      "Conversion finished but no "
+                          + extension
+                          + " file was produced in "
+                          + outputDir));
     } catch (IOException e) {
       throw new DoclingException("Failed to inspect output directory " + outputDir + ".", e);
     }
