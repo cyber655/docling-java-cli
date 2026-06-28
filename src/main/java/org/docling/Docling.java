@@ -96,8 +96,10 @@ public final class Docling {
    *     forms)
    * @param insertPageNumbers when {@code true}, inserts a {@code ---- Page N ----} marker line at the
    *     start of each page's content. Page boundaries come from docling's JSON output, so this runs a
-   *     single conversion that also emits JSON. Best-effort: pages with no locatable text are left
-   *     unmarked.
+   *     single conversion that also emits JSON. To keep that JSON small and fast (its only purpose
+   *     here is page provenance), images are exported as placeholders rather than embedded, so the
+   *     Markdown produced in this mode contains image placeholders instead of inline base64 images.
+   *     Best-effort: pages with no locatable text are left unmarked.
    * @return the generated Markdown
    * @throws DoclingException if docling cannot be launched, times out, or exits non-zero
    */
@@ -257,6 +259,13 @@ public final class Docling {
     if (alsoJson) {
       command.add("--to");
       command.add("json");
+      // docling defaults to --image-export-mode=embedded, which base64-encodes a full PNG of every
+      // page (and every picture/table) into the JSON. That bloats the JSON to many megabytes and
+      // makes it slow to write, read and parse — yet page numbering only needs each text item's
+      // prov[].page_no, never the images. "placeholder" leaves the images out entirely, keeping the
+      // JSON small and the conversion fast.
+      command.add("--image-export-mode");
+      command.add("placeholder");
     }
     command.add("--output");
     command.add(outputDir.toString());
